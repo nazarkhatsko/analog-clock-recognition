@@ -1,11 +1,11 @@
+import torch
 from torch import nn
-from utils import *
+import torchvision
 import torch.nn.functional as F
 from math import sqrt
 from itertools import product as product
-import torchvision
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from device import device
+from utils import decimate, find_jaccard_overlap, cxcy_to_xy, gcxgcy_to_cxcy, cxcy_to_gcxgcy, xy_to_cxcy
 
 
 class VGGBase(nn.Module):
@@ -89,10 +89,10 @@ class VGGBase(nn.Module):
     def load_pretrained_layers(self):
         """
         As in the paper, we use a VGG-16 pretrained on the ImageNet task as the base network.
-        There's one available in PyTorch, see https://pytorch.org/docs/stable/torchvision/models.html#torchvision.models.vgg16
-        We copy these parameters into our network. It's straightforward for conv1 to conv5.
+        There"s one available in PyTorch, see https://pytorch.org/docs/stable/torchvision/models.html#torchvision.models.vgg16
+        We copy these parameters into our network. It"s straightforward for conv1 to conv5.
         However, the original VGG-16 does not contain the conv6 and con7 layers.
-        Therefore, we convert fc6 and fc7 into convolutional layers, and subsample by decimation. See 'decimate' in utils.py.
+        Therefore, we convert fc6 and fc7 into convolutional layers, and subsample by decimation. See "decimate" in utils.py.
         """
         # Current state of base
         state_dict = self.state_dict()
@@ -108,15 +108,15 @@ class VGGBase(nn.Module):
 
         # Convert fc6, fc7 to convolutional layers, and subsample (by decimation) to sizes of conv6 and conv7
         # fc6
-        conv_fc6_weight = pretrained_state_dict['classifier.0.weight'].view(4096, 512, 7, 7)  # (4096, 512, 7, 7)
-        conv_fc6_bias = pretrained_state_dict['classifier.0.bias']  # (4096)
-        state_dict['conv6.weight'] = decimate(conv_fc6_weight, m=[4, None, 3, 3])  # (1024, 512, 3, 3)
-        state_dict['conv6.bias'] = decimate(conv_fc6_bias, m=[4])  # (1024)
+        conv_fc6_weight = pretrained_state_dict["classifier.0.weight"].view(4096, 512, 7, 7)  # (4096, 512, 7, 7)
+        conv_fc6_bias = pretrained_state_dict["classifier.0.bias"]  # (4096)
+        state_dict["conv6.weight"] = decimate(conv_fc6_weight, m=[4, None, 3, 3])  # (1024, 512, 3, 3)
+        state_dict["conv6.bias"] = decimate(conv_fc6_bias, m=[4])  # (1024)
         # fc7
-        conv_fc7_weight = pretrained_state_dict['classifier.3.weight'].view(4096, 4096, 1, 1)  # (4096, 4096, 1, 1)
-        conv_fc7_bias = pretrained_state_dict['classifier.3.bias']  # (4096)
-        state_dict['conv7.weight'] = decimate(conv_fc7_weight, m=[4, 4, None, None])  # (1024, 1024, 1, 1)
-        state_dict['conv7.bias'] = decimate(conv_fc7_bias, m=[4])  # (1024)
+        conv_fc7_weight = pretrained_state_dict["classifier.3.weight"].view(4096, 4096, 1, 1)  # (4096, 4096, 1, 1)
+        conv_fc7_bias = pretrained_state_dict["classifier.3.bias"]  # (4096)
+        state_dict["conv7.weight"] = decimate(conv_fc7_weight, m=[4, 4, None, None])  # (1024, 1024, 1, 1)
+        state_dict["conv7.bias"] = decimate(conv_fc7_bias, m=[4])  # (1024)
 
         # Note: an FC layer of size (K) operating on a flattened version (C*H*W) of a 2D image of size (C, H, W)...
         # ...is equivalent to a convolutional layer with kernel size (H, W), input channels C, output channels K...
@@ -148,7 +148,7 @@ class AuxiliaryConvolutions(nn.Module):
         self.conv11_1 = nn.Conv2d(256, 128, kernel_size=1, padding=0)
         self.conv11_2 = nn.Conv2d(128, 256, kernel_size=3, padding=0)  # dim. reduction because padding = 0
 
-        # Initialize convolutions' parameters
+        # Initialize convolutions" parameters
         self.init_conv2d()
 
     def init_conv2d(self):
@@ -191,10 +191,10 @@ class PredictionConvolutions(nn.Module):
     Convolutions to predict class scores and bounding boxes using lower and higher-level feature maps.
 
     The bounding boxes (locations) are predicted as encoded offsets w.r.t each of the 8732 prior (default) boxes.
-    See 'cxcy_to_gcxgcy' in utils.py for the encoding definition.
+    See "cxcy_to_gcxgcy" in utils.py for the encoding definition.
 
     The class scores represent the scores of each object class in each of the 8732 bounding boxes located.
-    A high score for 'background' = no object.
+    A high score for "background" = no object.
     """
 
     def __init__(self, n_classes):
@@ -206,31 +206,31 @@ class PredictionConvolutions(nn.Module):
         self.n_classes = n_classes
 
         # Number of prior-boxes we are considering per position in each feature map
-        n_boxes = {'conv4_3': 4,
-                   'conv7': 6,
-                   'conv8_2': 6,
-                   'conv9_2': 6,
-                   'conv10_2': 4,
-                   'conv11_2': 4}
+        n_boxes = {"conv4_3": 4,
+                   "conv7": 6,
+                   "conv8_2": 6,
+                   "conv9_2": 6,
+                   "conv10_2": 4,
+                   "conv11_2": 4}
         # 4 prior-boxes implies we use 4 different aspect ratios, etc.
 
         # Localization prediction convolutions (predict offsets w.r.t prior-boxes)
-        self.loc_conv4_3 = nn.Conv2d(512, n_boxes['conv4_3'] * 4, kernel_size=3, padding=1)
-        self.loc_conv7 = nn.Conv2d(1024, n_boxes['conv7'] * 4, kernel_size=3, padding=1)
-        self.loc_conv8_2 = nn.Conv2d(512, n_boxes['conv8_2'] * 4, kernel_size=3, padding=1)
-        self.loc_conv9_2 = nn.Conv2d(256, n_boxes['conv9_2'] * 4, kernel_size=3, padding=1)
-        self.loc_conv10_2 = nn.Conv2d(256, n_boxes['conv10_2'] * 4, kernel_size=3, padding=1)
-        self.loc_conv11_2 = nn.Conv2d(256, n_boxes['conv11_2'] * 4, kernel_size=3, padding=1)
+        self.loc_conv4_3 = nn.Conv2d(512, n_boxes["conv4_3"] * 4, kernel_size=3, padding=1)
+        self.loc_conv7 = nn.Conv2d(1024, n_boxes["conv7"] * 4, kernel_size=3, padding=1)
+        self.loc_conv8_2 = nn.Conv2d(512, n_boxes["conv8_2"] * 4, kernel_size=3, padding=1)
+        self.loc_conv9_2 = nn.Conv2d(256, n_boxes["conv9_2"] * 4, kernel_size=3, padding=1)
+        self.loc_conv10_2 = nn.Conv2d(256, n_boxes["conv10_2"] * 4, kernel_size=3, padding=1)
+        self.loc_conv11_2 = nn.Conv2d(256, n_boxes["conv11_2"] * 4, kernel_size=3, padding=1)
 
         # Class prediction convolutions (predict classes in localization boxes)
-        self.cl_conv4_3 = nn.Conv2d(512, n_boxes['conv4_3'] * n_classes, kernel_size=3, padding=1)
-        self.cl_conv7 = nn.Conv2d(1024, n_boxes['conv7'] * n_classes, kernel_size=3, padding=1)
-        self.cl_conv8_2 = nn.Conv2d(512, n_boxes['conv8_2'] * n_classes, kernel_size=3, padding=1)
-        self.cl_conv9_2 = nn.Conv2d(256, n_boxes['conv9_2'] * n_classes, kernel_size=3, padding=1)
-        self.cl_conv10_2 = nn.Conv2d(256, n_boxes['conv10_2'] * n_classes, kernel_size=3, padding=1)
-        self.cl_conv11_2 = nn.Conv2d(256, n_boxes['conv11_2'] * n_classes, kernel_size=3, padding=1)
+        self.cl_conv4_3 = nn.Conv2d(512, n_boxes["conv4_3"] * n_classes, kernel_size=3, padding=1)
+        self.cl_conv7 = nn.Conv2d(1024, n_boxes["conv7"] * n_classes, kernel_size=3, padding=1)
+        self.cl_conv8_2 = nn.Conv2d(512, n_boxes["conv8_2"] * n_classes, kernel_size=3, padding=1)
+        self.cl_conv9_2 = nn.Conv2d(256, n_boxes["conv9_2"] * n_classes, kernel_size=3, padding=1)
+        self.cl_conv10_2 = nn.Conv2d(256, n_boxes["conv10_2"] * n_classes, kernel_size=3, padding=1)
+        self.cl_conv11_2 = nn.Conv2d(256, n_boxes["conv11_2"] * n_classes, kernel_size=3, padding=1)
 
-        # Initialize convolutions' parameters
+        # Initialize convolutions" parameters
         self.init_conv2d()
 
     def init_conv2d(self):
@@ -256,7 +256,7 @@ class PredictionConvolutions(nn.Module):
         """
         batch_size = conv4_3_feats.size(0)
 
-        # Predict localization boxes' bounds (as offsets w.r.t prior-boxes)
+        # Predict localization boxes" bounds (as offsets w.r.t prior-boxes)
         l_conv4_3 = self.loc_conv4_3(conv4_3_feats)  # (N, 16, 38, 38)
         l_conv4_3 = l_conv4_3.permute(0, 2, 3,
                                       1).contiguous()  # (N, 38, 38, 16), to match prior-box order (after .view())
@@ -374,26 +374,26 @@ class SSD300(nn.Module):
 
         :return: prior boxes in center-size coordinates, a tensor of dimensions (8732, 4)
         """
-        fmap_dims = {'conv4_3': 38,
-                     'conv7': 19,
-                     'conv8_2': 10,
-                     'conv9_2': 5,
-                     'conv10_2': 3,
-                     'conv11_2': 1}
+        fmap_dims = {"conv4_3": 38,
+                     "conv7": 19,
+                     "conv8_2": 10,
+                     "conv9_2": 5,
+                     "conv10_2": 3,
+                     "conv11_2": 1}
 
-        obj_scales = {'conv4_3': 0.1,
-                      'conv7': 0.2,
-                      'conv8_2': 0.375,
-                      'conv9_2': 0.55,
-                      'conv10_2': 0.725,
-                      'conv11_2': 0.9}
+        obj_scales = {"conv4_3": 0.1,
+                      "conv7": 0.2,
+                      "conv8_2": 0.375,
+                      "conv9_2": 0.55,
+                      "conv10_2": 0.725,
+                      "conv11_2": 0.9}
 
-        aspect_ratios = {'conv4_3': [1., 2., 0.5],
-                         'conv7': [1., 2., 3., 0.5, .333],
-                         'conv8_2': [1., 2., 3., 0.5, .333],
-                         'conv9_2': [1., 2., 3., 0.5, .333],
-                         'conv10_2': [1., 2., 0.5],
-                         'conv11_2': [1., 2., 0.5]}
+        aspect_ratios = {"conv4_3": [1., 2., 0.5],
+                         "conv7": [1., 2., 3., 0.5, .333],
+                         "conv8_2": [1., 2., 3., 0.5, .333],
+                         "conv9_2": [1., 2., 3., 0.5, .333],
+                         "conv10_2": [1., 2., 0.5],
+                         "conv11_2": [1., 2., 0.5]}
 
         fmaps = list(fmap_dims.keys())
 
@@ -433,7 +433,7 @@ class SSD300(nn.Module):
         :param predicted_scores: class scores for each of the encoded locations/boxes, a tensor of dimensions (N, 8732, n_classes)
         :param min_score: minimum threshold for a box to be considered a match for a certain class
         :param max_overlap: maximum overlap two boxes can have so that the one with the lower score is not suppressed via NMS
-        :param top_k: if there are a lot of resulting detection across all classes, keep only the top 'k'
+        :param top_k: if there are a lot of resulting detection across all classes, keep only the top "k"
         :return: detections (boxes, labels, and scores), lists of length batch_size
         """
         batch_size = predicted_locs.size(0)
@@ -480,7 +480,7 @@ class SSD300(nn.Module):
                 # Non-Maximum Suppression (NMS)
 
                 # A torch.uint8 (byte) tensor to keep track of which predicted boxes to suppress
-                # 1 implies suppress, 0 implies don't suppress
+                # 1 implies suppress, 0 implies don"t suppress
                 suppress = torch.zeros((n_above_min_score), dtype=torch.uint8).to(device)  # (n_qualified)
 
                 # Consider each box in order of decreasing scores
@@ -492,9 +492,9 @@ class SSD300(nn.Module):
                     # Suppress boxes whose overlaps (with this box) are greater than maximum overlap
                     # Find such boxes and update suppress indices
                     suppress = torch.max(suppress, overlap[box] > max_overlap)
-                    # The max operation retains previously suppressed boxes, like an 'OR' operation
+                    # The max operation retains previously suppressed boxes, like an "OR" operation
 
-                    # Don't suppress this box, even though it has an overlap of 1 with itself
+                    # Don"t suppress this box, even though it has an overlap of 1 with itself
                     suppress[box] = 0
 
                 # Store only unsuppressed boxes for this class
@@ -502,7 +502,7 @@ class SSD300(nn.Module):
                 image_labels.append(torch.LongTensor((1 - suppress).sum().item() * [c]).to(device))
                 image_scores.append(class_scores[1 - suppress])
 
-            # If no object in any class is found, store a placeholder for 'background'
+            # If no object in any class is found, store a placeholder for "background"
             if len(image_boxes) == 0:
                 image_boxes.append(torch.FloatTensor([[0., 0., 1., 1.]]).to(device))
                 image_labels.append(torch.LongTensor([0]).to(device))
@@ -578,7 +578,7 @@ class MultiBoxLoss(nn.Module):
             # For each prior, find the object that has the maximum overlap
             overlap_for_each_prior, object_for_each_prior = overlap.max(dim=0)  # (8732)
 
-            # We don't want a situation where an object is not represented in our positive (non-background) priors -
+            # We don"t want a situation where an object is not represented in our positive (non-background) priors -
             # 1. An object might not be the best object for all priors, and is therefore not in object_for_each_prior.
             # 2. All priors with the object may be assigned as background based on the threshold (0.5).
 

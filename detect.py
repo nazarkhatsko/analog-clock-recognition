@@ -1,15 +1,18 @@
+import os
+import sys
+import torch
 from torchvision import transforms
-from utils import *
 from PIL import Image, ImageDraw, ImageFont
+from device import device
+from utils import rev_label_map, label_color_map
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load model checkpoint
-checkpoint = 'checkpoint_ssd300.pth.tar'
+checkpoint = "checkpoint_ssd300.pth.tar"
 checkpoint = torch.load(checkpoint)
-start_epoch = checkpoint['epoch'] + 1
-print('\nLoaded checkpoint from epoch %d.\n' % start_epoch)
-model = checkpoint['model']
+start_epoch = checkpoint["epoch"] + 1
+print("\nLoaded checkpoint from epoch {}.\n".format(start_epoch))
+model = checkpoint["model"]
 model = model.to(device)
 model.eval()
 
@@ -27,7 +30,7 @@ def detect(original_image, min_score, max_overlap, top_k, suppress=None):
     :param original_image: image, a PIL Image
     :param min_score: minimum threshold for a detected box to be considered a match for a certain class
     :param max_overlap: maximum overlap two boxes can have so that the one with the lower score is not suppressed via Non-Maximum Suppression (NMS)
-    :param top_k: if there are a lot of resulting detection across all classes, keep only the top 'k'
+    :param top_k: if there are a lot of resulting detection across all classes, keep only the top "k"
     :param suppress: classes that you know for sure cannot be in the image or you do not want in the image, a list
     :return: annotated image, a PIL Image
     """
@@ -46,7 +49,7 @@ def detect(original_image, min_score, max_overlap, top_k, suppress=None):
                                                              max_overlap=max_overlap, top_k=top_k)
 
     # Move detections to the CPU
-    det_boxes = det_boxes[0].to('cpu')
+    det_boxes = det_boxes[0].to("cpu")
 
     # Transform to original image dimensions
     original_dims = torch.FloatTensor(
@@ -54,10 +57,10 @@ def detect(original_image, min_score, max_overlap, top_k, suppress=None):
     det_boxes = det_boxes * original_dims
 
     # Decode class integer labels
-    det_labels = [rev_label_map[l] for l in det_labels[0].to('cpu').tolist()]
+    det_labels = [rev_label_map[l] for l in det_labels[0].to("cpu").tolist()]
 
-    # If no objects found, the detected labels will be set to ['0.'], i.e. ['background'] in SSD300.detect_objects() in model.py
-    if det_labels == ['background']:
+    # If no objects found, the detected labels will be set to ["0."], i.e. ["background"] in SSD300.detect_objects() in model.py
+    if det_labels == ["background"]:
         # Just return original image
         return original_image
 
@@ -88,15 +91,20 @@ def detect(original_image, min_score, max_overlap, top_k, suppress=None):
         textbox_location = [box_location[0], box_location[1] - text_size[1], box_location[0] + text_size[0] + 4.,
                             box_location[1]]
         draw.rectangle(xy=textbox_location, fill=label_color_map[det_labels[i]])
-        draw.text(xy=text_location, text=det_labels[i].upper(), fill='white',
+        draw.text(xy=text_location, text=det_labels[i].upper(), fill="white",
                   font=font)
     del draw
 
     return annotated_image
 
 
-if __name__ == '__main__':
-    img_path = '/media/ssd/ssd data/VOC2007/JPEGImages/000001.jpg'
-    original_image = Image.open(img_path, mode='r')
-    original_image = original_image.convert('RGB')
-    detect(original_image, min_score=0.2, max_overlap=0.5, top_k=200).show()
+if __name__ == "__main__":
+    input_dir = sys.argv[1]
+    output_dir = sys.argv[2]
+    filenames = list(filter(lambda x: x.endswith(".jpg"), os.listdir(input_dir)))
+    for i, fn in enumerate(filenames):
+        original_image = Image.open(os.path.join(input_dir, fn), mode="r")
+        original_image = original_image.convert("RGB")
+        inference_image = detect(original_image, min_score=0.2, max_overlap=0.5, top_k=200)
+        inference_image.save(os.path.join(output_dir, fn))
+        print("=> [{}/{}] {}".format(i+1, len(filenames), fn))

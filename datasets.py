@@ -1,9 +1,8 @@
+import os
 import torch
 from torch.utils.data import Dataset
-import json
-import os
 from PIL import Image
-from utils import transform
+from utils import transform, parse_annotation, label_map
 
 
 class PascalVOCDataset(Dataset):
@@ -14,34 +13,32 @@ class PascalVOCDataset(Dataset):
     def __init__(self, data_folder, split, keep_difficult=False):
         """
         :param data_folder: folder where data files are stored
-        :param split: split, one of 'TRAIN' or 'TEST'
+        :param split: split, one of "TRAIN" or "TEST"
         :param keep_difficult: keep or discard objects that are considered difficult to detect?
         """
         self.split = split.upper()
 
-        assert self.split in {'TRAIN', 'TEST'}
+        assert self.split in {"TRAIN", "TEST"}
 
         self.data_folder = data_folder
         self.keep_difficult = keep_difficult
 
         # Read data files
-        with open(os.path.join(data_folder, self.split + '_images.json'), 'r') as j:
-            self.images = json.load(j)
-        with open(os.path.join(data_folder, self.split + '_objects.json'), 'r') as j:
-            self.objects = json.load(j)
+        self.images = [os.path.join(data_folder, i) for i in os.listdir(data_folder) if i.endswith(".jpg")]
+        self.objects = [parse_annotation(i.replace(".jpg", ".xml")) for i in self.images]
 
         assert len(self.images) == len(self.objects)
 
     def __getitem__(self, i):
         # Read image
-        image = Image.open(self.images[i], mode='r')
-        image = image.convert('RGB')
+        image = Image.open(self.images[i], mode="r")
+        image = image.convert("RGB")
 
         # Read objects in this image (bounding boxes, labels, difficulties)
         objects = self.objects[i]
-        boxes = torch.FloatTensor(objects['boxes'])  # (n_objects, 4)
-        labels = torch.LongTensor(objects['labels'])  # (n_objects)
-        difficulties = torch.ByteTensor(objects['difficulties'])  # (n_objects)
+        boxes = torch.FloatTensor(objects["boxes"])  # (n_objects, 4)
+        labels = torch.LongTensor([label_map[l] for l in objects["labels"]]) # objects["labels"])  # (n_objects)
+        difficulties = torch.ByteTensor(objects["difficulties"])  # (n_objects)
 
         # Discard difficult objects, if desired
         if not self.keep_difficult:

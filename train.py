@@ -4,16 +4,16 @@ import torch.optim
 import torch.utils.data
 from model import SSD300, MultiBoxLoss
 from datasets import PascalVOCDataset
-from utils import *
+from device import device
+from utils import AverageMeter, adjust_learning_rate, clip_gradient, save_checkpoint, label_map
 
 # Data parameters
-data_folder = './'  # folder with data files
+data_folder = "./clocks/train"  # folder with data files
 keep_difficult = True  # use objects considered difficult to detect?
 
 # Model parameters
 # Not too many here since the SSD300 has a very specific structure
 n_classes = len(label_map)  # number of different types of objects
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Learning parameters
 checkpoint = None  # path to model checkpoint, None if none
@@ -46,19 +46,19 @@ def main():
         not_biases = list()
         for param_name, param in model.named_parameters():
             if param.requires_grad:
-                if param_name.endswith('.bias'):
+                if param_name.endswith(".bias"):
                     biases.append(param)
                 else:
                     not_biases.append(param)
-        optimizer = torch.optim.SGD(params=[{'params': biases, 'lr': 2 * lr}, {'params': not_biases}],
+        optimizer = torch.optim.SGD(params=[{"params": biases, "lr": 2 * lr}, {"params": not_biases}],
                                     lr=lr, momentum=momentum, weight_decay=weight_decay)
 
     else:
         checkpoint = torch.load(checkpoint)
-        start_epoch = checkpoint['epoch'] + 1
-        print('\nLoaded checkpoint from epoch %d.\n' % start_epoch)
-        model = checkpoint['model']
-        optimizer = checkpoint['optimizer']
+        start_epoch = checkpoint["epoch"] + 1
+        print("\nLoaded checkpoint from epoch %d.\n" % start_epoch)
+        model = checkpoint["model"]
+        optimizer = checkpoint["optimizer"]
 
     # Move to default device
     model = model.to(device)
@@ -66,11 +66,11 @@ def main():
 
     # Custom dataloaders
     train_dataset = PascalVOCDataset(data_folder,
-                                     split='train',
+                                     split="train",
                                      keep_difficult=keep_difficult)
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                                                collate_fn=train_dataset.collate_fn, num_workers=workers,
-                                               pin_memory=True)  # note that we're passing the collate function here
+                                               pin_memory=True)  # note that we"re passing the collate function here
 
     # Calculate total number of epochs to train and the epochs to decay learning rate at (i.e. convert iterations to epochs)
     # To convert iterations to epochs, divide iterations by the number of iterations per epoch
@@ -85,7 +85,7 @@ def main():
         if epoch in decay_lr_at:
             adjust_learning_rate(optimizer, decay_lr_to)
 
-        # One epoch's training
+        # One epoch"s training
         train(train_loader=train_loader,
               model=model,
               criterion=criterion,
@@ -98,7 +98,7 @@ def main():
 
 def train(train_loader, model, criterion, optimizer, epoch):
     """
-    One epoch's training.
+    One epoch"s training.
 
     :param train_loader: DataLoader for training data
     :param model: model
@@ -116,6 +116,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
     # Batches
     for i, (images, boxes, labels, _) in enumerate(train_loader):
+        print("OK", i)
         data_time.update(time.time() - start)
 
         # Move to default device
@@ -147,14 +148,14 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         # Print status
         if i % print_freq == 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
-                  'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Data Time {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(epoch, i, len(train_loader),
+            print("Epoch: [{0}][{1}/{2}]\t"
+                  "Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
+                  "Data Time {data_time.val:.3f} ({data_time.avg:.3f})\t"
+                  "Loss {loss.val:.4f} ({loss.avg:.4f})\t".format(epoch, i, len(train_loader),
                                                                   batch_time=batch_time,
                                                                   data_time=data_time, loss=losses))
     del predicted_locs, predicted_scores, images, boxes, labels  # free some memory since their histories may be stored
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
